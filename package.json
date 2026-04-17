@@ -1,0 +1,52 @@
+{
+  "name": "com.yoruyomix.unitaskcommandbus",
+  "version": "0.1.0",
+  "displayName": "UniTask Command Bus",
+  "description": "A Unity command pattern library that supports lambda-first, progressive class-based extension. Provides UniTask-based async execution with Undo/Redo, 5 async policies (Drop/Sequential/Switch/ThrottleLast/Parallel), and history management.",
+  "unity": "2021.3",
+  "dependencies": {
+    "com.cysharp.unitask": "2.5.0"
+  },
+  "keywords": ["command", "unitask", "async", "undo", "redo", "history", "command-bus"],
+  "author": {
+    "name": "YoruYomix",
+    "url": "https://github.com/YoruYomix"
+  },
+  "samples": [
+    {
+      "displayName": "Stage 01 - Basics",
+      "description": "Synchronous commands and basic Invoker<T> usage",
+      "path": "Samples~/Stage01_Basics"
+    },
+    {
+      "displayName": "Stage 02 - Async & Policies",
+      "description": "Async commands, Cancel, and 5 AsyncPolicy variants",
+      "path": "Samples~/Stage02_Async"
+    },
+    {
+      "displayName": "Stage 03 - History",
+      "description": "HistoryInvoker<T>: Undo/Redo/Pop/Clear",
+      "path": "Samples~/Stage03_History"
+    },
+    {
+      "displayName": "Stage 04 - Advanced",
+      "description": "JumpTo, Dispose, ExecutionPhase, OnHistoryChanged integration",
+      "path": "Samples~/Stage04_Advanced"
+    },
+    {
+      "displayName": "Stage 05 - Stress Test",
+      "description": "High-intensity mixed API tests: policy × history × undo/redo combinations",
+      "path": "Samples~/Stage05_StressTest"
+    },
+    {
+      "displayName": "Stage 06 - Super Stress Test",
+      "description": "Extreme edge-case tests: cross-CTS cancellation, reentrant chains, maxSize=1, ThrottleLast bombing, Undo/Redo interleaving",
+      "path": "Samples~/Stage06_SuperStress"
+    },
+    {
+      "displayName": "Stage 07 - Fault Tolerance",
+      "description": "Regression tests for exception handling: Faulted result, policy flag resets via finally, Sequential/ThrottleLast loop continuation after fault",
+      "path": "Samples~/Stage07_FaultTolerance"
+    }
+  ]
+}

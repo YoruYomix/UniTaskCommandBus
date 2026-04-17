@@ -1,0 +1,44 @@
+# UPM tilde folders (overrides global *~ backup-file rule)
+!Samples~/
+!Documentation~/
+
+# Internal project documents
+CLAUDE.md
+UniTaskCommandBus-Spec.md
+
+# Unity project — not part of the UPM package
+Assets/
+ProjectSettings/
+Packages/
+Library/
+Temp/
+Obj/
+Build/
+Builds/
+Logs/
+UserSettings/
+MemoryCaptures/
+
+# Visual Studio / Rider
+.vs/
+.idea/
+*.sln
+*.csproj
+*.user
+
+# macOS
+.DS_Store
+*.DS_Store
+
+# Crash dumps
+*.blob
+
+# Unity auto-generated meta files when ignored items change
+*.pidb.meta
+*.pdb.meta
+*.mdb.meta
+
+# Unity3D generated meta files
+*.pidb
+*.pdb
+*.mdb

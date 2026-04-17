@@ -1,0 +1,12 @@
+{
+  "name": "UniTaskCommandBus.Samples.Stage01",
+  "rootNamespace": "UniTaskCommandBus.Samples",
+  "references": [
+    "UniTaskCommandBus.Runtime",
+    "UniTask"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "autoReferenced": true,
+  "noEngineReferences": false
+}

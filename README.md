@@ -259,7 +259,7 @@ Attach the `Stage0N_*Sample` component to an empty GameObject and press Play —
 
 ## Documentation
 
-Full API spec: [`Documentation~/UniTaskCommandBus-Spec.md`](Documentation~/UniTaskCommandBus-Spec.md)
+Full API spec: [`Documentation~/UniTaskCommandBus-Spec-EN.md`](Documentation~/UniTaskCommandBus-Spec-EN.md)
 
 ---
 

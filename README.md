@@ -54,9 +54,9 @@ https://github.com/YoruYomix/UniTaskCommandBus.git
 
 ## Examples
 
-### Placing characters on a formation grid (Blue Archive / Uma Musume style)
+### Formation setup in a strategy game
 
-Players drag characters onto a formation grid. Each placement is undoable, and rapid dragging shouldn't queue up ghost moves.
+Players drag units onto a formation grid before battle. Each placement is undoable, and rapid dragging shouldn't queue up ghost moves.
 
 ```csharp
 public class FormationScreen : MonoBehaviour

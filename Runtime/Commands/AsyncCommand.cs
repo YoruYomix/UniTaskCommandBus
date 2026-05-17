@@ -5,6 +5,33 @@ using Cysharp.Threading.Tasks;
 namespace UniTaskCommandBus
 {
     /// <summary>
+    /// A payload-free asynchronous lambda command.
+    /// Internally this is an <see cref="AsyncCommand{T}"/> using <see cref="CommandUnit"/>.
+    /// </summary>
+    public class AsyncCommand : AsyncCommand<CommandUnit>
+    {
+        /// <summary>Creates a payload-free async command from a simple execute delegate.</summary>
+        public AsyncCommand(
+            Func<CancellationToken, UniTask> execute,
+            Func<CancellationToken, UniTask> undo = null,
+            string name = "")
+            : base((_, ct) => execute(ct), undo == null ? null : (_, ct) => undo(ct), name)
+        {
+            if (execute == null) throw new ArgumentNullException(nameof(execute));
+        }
+
+        /// <summary>Creates a payload-free async command from a phase-aware execute delegate.</summary>
+        public AsyncCommand(
+            Func<ExecutionPhase, CancellationToken, UniTask> execute,
+            Func<CancellationToken, UniTask> undo = null,
+            string name = "")
+            : base((_, phase, ct) => execute(phase, ct), undo == null ? null : (_, ct) => undo(ct), name)
+        {
+            if (execute == null) throw new ArgumentNullException(nameof(execute));
+        }
+    }
+
+    /// <summary>
     /// An asynchronous lambda command. Wraps async execute and undo delegates.
     /// </summary>
     public class AsyncCommand<T>

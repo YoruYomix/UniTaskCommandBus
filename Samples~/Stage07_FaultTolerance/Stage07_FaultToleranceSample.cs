@@ -61,9 +61,9 @@ namespace UniTaskCommandBus.Samples
         private async UniTask Test1_FaultedResult_Switch()
         {
             Debug.Log("[Stage07] ▶ 테스트 1: Switch 정책 — 람다 throw 시 ExecuteAsync가 Faulted 반환");
-            var invoker = CommandBus.Create<CommandUnit>().WithPolicy(AsyncPolicy.Switch).Build();
+            var invoker = CommandBus.Create().WithPolicy(AsyncPolicy.Switch).Build();
 
-            var cmd = new AsyncCommand<CommandUnit>(async (_, ct) =>
+            var cmd = new AsyncCommand(async ct =>
             {
                 await UniTask.Yield(ct);
                 throw new InvalidOperationException("의도적 예외");
@@ -84,9 +84,9 @@ namespace UniTaskCommandBus.Samples
         private async UniTask Test2_Drop_FlagResetAfterFault()
         {
             Debug.Log("[Stage07] ▶ 테스트 2: Drop 정책 — 예외 후 _isRunning finally 리셋, 다음 Execute 수락");
-            var invoker = CommandBus.Create<CommandUnit>().WithPolicy(AsyncPolicy.Drop).Build();
+            var invoker = CommandBus.Create().WithPolicy(AsyncPolicy.Drop).Build();
 
-            var faultCmd = new AsyncCommand<CommandUnit>(async (_, ct) =>
+            var faultCmd = new AsyncCommand(async ct =>
             {
                 await UniTask.Yield(ct);
                 throw new InvalidOperationException("fault");
@@ -95,7 +95,7 @@ namespace UniTaskCommandBus.Samples
             var r1 = await invoker.ExecuteAsync(faultCmd);
 
             bool accepted = false;
-            var r2 = invoker.Execute(_ => { accepted = true; });
+            var r2 = invoker.Execute(() => { accepted = true; });
 
             if (r1 == ExecutionResult.Faulted && r2 != ExecutionResult.Dropped && accepted)
                 Pass("테스트2 Drop 플래그 리셋");
@@ -110,9 +110,9 @@ namespace UniTaskCommandBus.Samples
         private async UniTask Test3_Sequential_FlagResetAfterFault()
         {
             Debug.Log("[Stage07] ▶ 테스트 3: Sequential 정책 — 예외 후 _isLoopRunning finally 리셋, 다음 Execute 수락");
-            var invoker = CommandBus.Create<CommandUnit>().WithPolicy(AsyncPolicy.Sequential).Build();
+            var invoker = CommandBus.Create().WithPolicy(AsyncPolicy.Sequential).Build();
 
-            var faultCmd = new AsyncCommand<CommandUnit>(async (_, ct) =>
+            var faultCmd = new AsyncCommand(async ct =>
             {
                 await UniTask.Yield(ct);
                 throw new InvalidOperationException("fault");
@@ -121,7 +121,7 @@ namespace UniTaskCommandBus.Samples
             var r1 = await invoker.ExecuteAsync(faultCmd);
 
             bool accepted = false;
-            var r2 = await invoker.ExecuteAsync(new Command<CommandUnit>(_ => { accepted = true; }));
+            var r2 = await invoker.ExecuteAsync(new Command(() => { accepted = true; }));
 
             if (r1 == ExecutionResult.Faulted && r2 == ExecutionResult.Completed && accepted)
                 Pass("테스트3 Sequential 플래그 리셋");
@@ -136,9 +136,9 @@ namespace UniTaskCommandBus.Samples
         private async UniTask Test4_ThrottleLast_FlagResetAfterFault()
         {
             Debug.Log("[Stage07] ▶ 테스트 4: ThrottleLast 정책 — 예외 후 _isRunning finally 리셋, 다음 Execute 수락");
-            var invoker = CommandBus.Create<CommandUnit>().WithPolicy(AsyncPolicy.ThrottleLast).Build();
+            var invoker = CommandBus.Create().WithPolicy(AsyncPolicy.ThrottleLast).Build();
 
-            var faultCmd = new AsyncCommand<CommandUnit>(async (_, ct) =>
+            var faultCmd = new AsyncCommand(async ct =>
             {
                 await UniTask.Yield(ct);
                 throw new InvalidOperationException("fault");
@@ -147,7 +147,7 @@ namespace UniTaskCommandBus.Samples
             var r1 = await invoker.ExecuteAsync(faultCmd);
 
             bool accepted = false;
-            var r2 = await invoker.ExecuteAsync(new Command<CommandUnit>(_ => { accepted = true; }));
+            var r2 = await invoker.ExecuteAsync(new Command(() => { accepted = true; }));
 
             if (r1 == ExecutionResult.Faulted && r2 == ExecutionResult.Completed && accepted)
                 Pass("테스트4 ThrottleLast 플래그 리셋");
@@ -162,9 +162,9 @@ namespace UniTaskCommandBus.Samples
         private async UniTask Test5_Sequential_QueueContinuesAfterFault()
         {
             Debug.Log("[Stage07] ▶ 테스트 5: Sequential 큐 — 첫 항목 예외 후 대기 항목 계속 실행");
-            var invoker = CommandBus.Create<CommandUnit>().WithPolicy(AsyncPolicy.Sequential).Build();
+            var invoker = CommandBus.Create().WithPolicy(AsyncPolicy.Sequential).Build();
 
-            var faultCmd = new AsyncCommand<CommandUnit>(async (_, ct) =>
+            var faultCmd = new AsyncCommand(async ct =>
             {
                 await UniTask.Yield(ct);
                 throw new InvalidOperationException("fault");
@@ -174,8 +174,8 @@ namespace UniTaskCommandBus.Samples
             bool thirdRan = false;
 
             var t1 = invoker.ExecuteAsync(faultCmd);
-            var t2 = invoker.ExecuteAsync(new Command<CommandUnit>(_ => { secondRan = true; }));
-            var t3 = invoker.ExecuteAsync(new Command<CommandUnit>(_ => { thirdRan = true; }));
+            var t2 = invoker.ExecuteAsync(new Command(() => { secondRan = true; }));
+            var t3 = invoker.ExecuteAsync(new Command(() => { thirdRan = true; }));
 
             var (r1, r2, r3) = await UniTask.WhenAll(t1, t2, t3);
 
@@ -195,16 +195,16 @@ namespace UniTaskCommandBus.Samples
         private async UniTask Test6_ThrottleLast_SlotRunsAfterFault()
         {
             Debug.Log("[Stage07] ▶ 테스트 6: ThrottleLast 슬롯 — 첫 항목 예외 후 슬롯 항목 실행");
-            var invoker = CommandBus.Create<CommandUnit>().WithPolicy(AsyncPolicy.ThrottleLast).Build();
+            var invoker = CommandBus.Create().WithPolicy(AsyncPolicy.ThrottleLast).Build();
 
-            var faultCmd = new AsyncCommand<CommandUnit>(async (_, ct) =>
+            var faultCmd = new AsyncCommand(async ct =>
             {
                 await UniTask.Yield(ct);
                 throw new InvalidOperationException("fault");
             });
 
             bool slotRan = false;
-            var slotCmd = new AsyncCommand<CommandUnit>(async (_, ct) =>
+            var slotCmd = new AsyncCommand(async ct =>
             {
                 await UniTask.Yield(ct);
                 slotRan = true;
@@ -229,13 +229,13 @@ namespace UniTaskCommandBus.Samples
         private async UniTask Test7_HistoryInvoker_HistoryPreservedAfterFault()
         {
             Debug.Log("[Stage07] ▶ 테스트 7: HistoryInvoker — 예외 후에도 히스토리 항목 유지 (적재는 람다 실행 전)");
-            var invoker = CommandBus.Create<CommandUnit>()
+            var invoker = CommandBus.Create()
                 .WithPolicy(AsyncPolicy.Switch)
                 .WithHistory(10)
                 .Build();
 
-            var faultCmd = new AsyncCommand<CommandUnit>(
-                execute: async (_, ct) =>
+            var faultCmd = new AsyncCommand(
+                execute: async ct =>
                 {
                     await UniTask.Yield(ct);
                     throw new InvalidOperationException("fault");
@@ -265,22 +265,22 @@ namespace UniTaskCommandBus.Samples
         private async UniTask Test8_Parallel_FaultIsolation()
         {
             Debug.Log("[Stage07] ▶ 테스트 8: Parallel 정책 — 한 커맨드 예외가 다른 커맨드에 영향 없음");
-            var invoker = CommandBus.Create<CommandUnit>().WithPolicy(AsyncPolicy.Parallel).Build();
+            var invoker = CommandBus.Create().WithPolicy(AsyncPolicy.Parallel).Build();
 
             bool aRan = false;
             bool bRan = false;
 
-            var cmdA = new AsyncCommand<CommandUnit>(async (_, ct) =>
+            var cmdA = new AsyncCommand(async ct =>
             {
                 await UniTask.Delay(50, cancellationToken: ct);
                 aRan = true;
             });
-            var cmdFault = new AsyncCommand<CommandUnit>(async (_, ct) =>
+            var cmdFault = new AsyncCommand(async ct =>
             {
                 await UniTask.Yield(ct);
                 throw new InvalidOperationException("fault");
             });
-            var cmdB = new AsyncCommand<CommandUnit>(async (_, ct) =>
+            var cmdB = new AsyncCommand(async ct =>
             {
                 await UniTask.Delay(50, cancellationToken: ct);
                 bRan = true;
@@ -308,13 +308,13 @@ namespace UniTaskCommandBus.Samples
         private async UniTask Test9_OnError_EventFires()
         {
             Debug.Log("[Stage07] ▶ 테스트 9: OnError 이벤트 — 람다 throw 시 예외 인스턴스 전달 확인");
-            var invoker = CommandBus.Create<CommandUnit>().WithPolicy(AsyncPolicy.Switch).Build();
+            var invoker = CommandBus.Create().WithPolicy(AsyncPolicy.Switch).Build();
 
             Exception captured = null;
             invoker.OnError += ex => { captured = ex; };
 
             var expected = new InvalidOperationException("OnError 테스트 예외");
-            var cmd = new AsyncCommand<CommandUnit>(async (_, ct) =>
+            var cmd = new AsyncCommand(async ct =>
             {
                 await UniTask.Yield(ct);
                 throw expected;
@@ -337,14 +337,14 @@ namespace UniTaskCommandBus.Samples
         private async UniTask Test10_ExecuteAsync_CancellationTokenMatchesCancel()
         {
             Debug.Log("[Stage07] ▶ 테스트 10: ExecuteAsync CancellationToken — Cancel()과 동일하게 실행 중 작업 취소");
-            var invoker = CommandBus.Create<CommandUnit>().WithPolicy(AsyncPolicy.Parallel).Build();
+            var invoker = CommandBus.Create().WithPolicy(AsyncPolicy.Parallel).Build();
             var cts = new CancellationTokenSource();
 
-            var cmdA = new AsyncCommand<CommandUnit>(async (_, ct) =>
+            var cmdA = new AsyncCommand(async ct =>
             {
                 await UniTask.Delay(1000, cancellationToken: ct);
             });
-            var cmdB = new AsyncCommand<CommandUnit>(async (_, ct) =>
+            var cmdB = new AsyncCommand(async ct =>
             {
                 await UniTask.Delay(1000, cancellationToken: ct);
             });
@@ -371,18 +371,18 @@ namespace UniTaskCommandBus.Samples
         private async UniTask Test11_UndoRedoAsync_CancellationTokenMatchesCancel()
         {
             Debug.Log("[Stage07] ▶ 테스트 11: UndoAsync/RedoAsync CancellationToken — Cancel()과 동일하게 취소");
-            var invoker = CommandBus.Create<CommandUnit>()
+            var invoker = CommandBus.Create()
                 .WithPolicy(AsyncPolicy.Sequential)
                 .WithHistory(10)
                 .Build();
 
-            var cmd = new AsyncCommand<CommandUnit>(
-                execute: async (_, phase, ct) =>
+            var cmd = new AsyncCommand(
+                execute: async (phase, ct) =>
                 {
                     if (phase == ExecutionPhase.Redo)
                         await UniTask.Delay(1000, cancellationToken: ct);
                 },
-                undo: async (_, ct) =>
+                undo: async ct =>
                 {
                     await UniTask.Delay(1000, cancellationToken: ct);
                 },

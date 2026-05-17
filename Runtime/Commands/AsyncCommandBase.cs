@@ -4,6 +4,38 @@ using Cysharp.Threading.Tasks;
 namespace UniTaskCommandBus
 {
     /// <summary>
+    /// Base class for payload-free asynchronous commands.
+    /// Internally this is an <see cref="AsyncCommandBase{T}"/> using <see cref="CommandUnit"/>.
+    /// </summary>
+    public abstract class AsyncCommandBase : AsyncCommandBase<CommandUnit>
+    {
+        /// <summary>Executes the command asynchronously without a payload.</summary>
+        public abstract UniTask ExecuteAsync(CancellationToken ct);
+
+        /// <summary>
+        /// Executes the command asynchronously with phase context.
+        /// Defaults to calling <see cref="ExecuteAsync(CancellationToken)"/>.
+        /// </summary>
+        public virtual UniTask ExecuteAsync(ExecutionPhase phase, CancellationToken ct)
+            => ExecuteAsync(ct);
+
+        /// <inheritdoc />
+        public sealed override UniTask ExecuteAsync(CommandUnit payload, CancellationToken ct)
+            => ExecuteAsync(ct);
+
+        /// <inheritdoc />
+        public sealed override UniTask ExecuteAsync(CommandUnit payload, ExecutionPhase phase, CancellationToken ct)
+            => ExecuteAsync(phase, ct);
+
+        /// <summary>Undoes the command asynchronously. Default implementation completes immediately.</summary>
+        public virtual UniTask UndoAsync(CancellationToken ct) => UniTask.CompletedTask;
+
+        /// <inheritdoc />
+        public sealed override UniTask UndoAsync(CommandUnit payload, CancellationToken ct)
+            => UndoAsync(ct);
+    }
+
+    /// <summary>
     /// Base class for asynchronous class-based commands.
     /// Override <see cref="ExecuteAsync(T, CancellationToken)"/> at minimum;
     /// override <see cref="UndoAsync"/> if Undo support is needed.

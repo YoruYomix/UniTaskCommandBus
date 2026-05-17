@@ -13,7 +13,8 @@ Most command pattern libraries force you to choose upfront: write a full class h
 
 ```csharp
 // Start here — zero boilerplate
-invoker.Execute(execute: _ => counter++, undo: _ => counter--);
+var invoker = CommandBus.Create().Build();
+invoker.Execute(execute: () => counter++, undo: () => counter--);
 
 // Graduate here when you need to
 invoker.Execute(new MoveCommand(), payload);
@@ -28,7 +29,7 @@ invoker.Execute(new MoveCommand(), payload);
 - **`OnHistoryChanged` event** — drives any timeline UI
 - **`ExecuteAsync`** returns `UniTask<ExecutionResult>` — await it, cancel it with `Cancel()` or a `CancellationToken`, or forget it
 - **`OnError` event** — exceptions surface without crashing the invoker
-- **Zero payload boilerplate** via `CommandUnit`
+- **Payload-free API** via `CommandBus.Create()`, `Command`, and `AsyncCommand`
 
 ---
 
@@ -118,7 +119,7 @@ A tutorial opens panels one by one. Each step is async (fade-in), and the player
 public class TutorialFlow : MonoBehaviour
 {
     // Sequential policy: steps run in order, never overlap.
-    private HistoryInvoker<CommandUnit> _invoker = CommandBus.Create<CommandUnit>()
+    private HistoryInvoker<CommandUnit> _invoker = CommandBus.Create()
         .WithPolicy(AsyncPolicy.Sequential)
         .WithHistory(20)
         .Build();
@@ -136,9 +137,9 @@ public class TutorialFlow : MonoBehaviour
 
     public void OpenStep(int panelIndex)
     {
-        _invoker.Execute(new AsyncCommand<CommandUnit>(
-            execute: async (_, ct) => await FadeIn(_panels[panelIndex], ct),
-            undo:    async (_, ct) => await FadeOut(_panels[panelIndex], ct),
+        _invoker.Execute(new AsyncCommand(
+            execute: async ct => await FadeIn(_panels[panelIndex], ct),
+            undo:    async ct => await FadeOut(_panels[panelIndex], ct),
             name: _panels[panelIndex].name
         ));
     }
@@ -180,6 +181,10 @@ public class TutorialFlow : MonoBehaviour
 ### Builder
 
 ```csharp
+CommandBus.Create()
+    .WithPolicy(AsyncPolicy.Sequential)
+    .Build();                             // → Invoker<CommandUnit>
+
 CommandBus.Create<T>()
     .WithPolicy(AsyncPolicy.Sequential)   // Drop | Sequential | Switch | ThrottleLast | Parallel
     .WithHistory(maxSize: 20)             // → HistoryInvokerBuilder
@@ -190,6 +195,10 @@ CommandBus.Create<T>()
 
 | Type | Use when |
 |------|----------|
+| `Command` | Payload-free sync lambda |
+| `AsyncCommand` | Payload-free async lambda |
+| `CommandBase` | Payload-free class-based sync |
+| `AsyncCommandBase` | Payload-free class-based async |
 | `Command<T>` | Sync lambda, zero setup |
 | `AsyncCommand<T>` | Async lambda |
 | `CommandBase<T>` | Class-based sync, need state or DI |
@@ -264,7 +273,7 @@ Attach the `Stage0N_*Sample` component to an empty GameObject and press Play —
 
 | Sample | What it covers |
 |--------|---------------|
-| Stage 01 · Basics | Sync commands, lambda / class, `CommandUnit`, `Name` |
+| Stage 01 · Basics | Sync commands, lambda / class, payload-free commands, `Name` |
 | Stage 02 · Async & Policies | `AsyncCommand`, all 5 policies, `Cancel` / `CancelAll` |
 | Stage 03 · History | `HistoryInvoker`, Undo / Redo / Pop / Clear, `OnHistoryChanged`, history-loading rules |
 | Stage 04 · Advanced | `JumpTo`, `Dispose`, `ExecutionPhase`, end-to-end scenario |

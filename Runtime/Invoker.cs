@@ -75,12 +75,20 @@ namespace UniTaskCommandBus
             return ExecuteFireAndForget(new SyncClassCommandAdapter<T>(cmd), payload, GetExecutionPhase());
         }
 
+        /// <summary>Executes a class-based synchronous command with default payload.</summary>
+        public ExecutionResult Execute(CommandBase<T> cmd)
+            => Execute(cmd, default);
+
         /// <summary>
         /// Shortcut: pass execute/undo delegates directly without creating a <see cref="Command{T}"/>.
         /// Primarily for use with <see cref="CommandUnit"/> (payload-free) scenarios.
         /// </summary>
         public ExecutionResult Execute(Action<T> execute, Action<T> undo = null, string name = "")
             => Execute(new Command<T>(execute, undo, name), default);
+
+        /// <summary>Shortcut: executes a payload-free delegate using default payload.</summary>
+        public ExecutionResult Execute(Action execute, Action undo = null, string name = "")
+            => Execute(new Command<T>(_ => execute(), undo == null ? null : _ => undo(), name), default);
 
         /// <summary>Starts an async lambda command according to the configured policy (fire-and-forget).</summary>
         public ExecutionResult Execute(AsyncCommand<T> cmd, T payload)
@@ -89,12 +97,28 @@ namespace UniTaskCommandBus
             return ExecuteFireAndForget(new AsyncCommandAdapter<T>(cmd), payload, GetExecutionPhase());
         }
 
+        /// <summary>Starts an async lambda command with default payload according to the configured policy.</summary>
+        public ExecutionResult Execute(AsyncCommand<T> cmd)
+            => Execute(cmd, default);
+
+        /// <summary>Shortcut: starts a payload-free async delegate using default payload.</summary>
+        public ExecutionResult Execute(Func<CancellationToken, UniTask> execute, Func<CancellationToken, UniTask> undo = null, string name = "")
+            => Execute(new AsyncCommand<T>((_, ct) => execute(ct), undo == null ? null : (_, ct) => undo(ct), name), default);
+
+        /// <summary>Shortcut: starts a payload-free, phase-aware async delegate using default payload.</summary>
+        public ExecutionResult Execute(Func<ExecutionPhase, CancellationToken, UniTask> execute, Func<CancellationToken, UniTask> undo = null, string name = "")
+            => Execute(new AsyncCommand<T>((_, phase, ct) => execute(phase, ct), undo == null ? null : (_, ct) => undo(ct), name), default);
+
         /// <summary>Starts an async class-based command according to the configured policy (fire-and-forget).</summary>
         public ExecutionResult Execute(AsyncCommandBase<T> cmd, T payload)
         {
             ThrowIfDisposed();
             return ExecuteFireAndForget(new AsyncClassCommandAdapter<T>(cmd), payload, GetExecutionPhase());
         }
+
+        /// <summary>Starts an async class-based command with default payload according to the configured policy.</summary>
+        public ExecutionResult Execute(AsyncCommandBase<T> cmd)
+            => Execute(cmd, default);
 
         // ── Async Execute overloads ──────────────────────────────────────────
 
@@ -128,6 +152,22 @@ namespace UniTaskCommandBus
             return SubmitAsync(new SyncClassCommandAdapter<T>(cmd), payload, GetExecutionPhase(), cancellationToken);
         }
 
+        /// <summary>Awaits completion of a class-based sync command with default payload.</summary>
+        public UniTask<ExecutionResult> ExecuteAsync(CommandBase<T> cmd)
+            => ExecuteAsync(cmd, default, CancellationToken.None);
+
+        /// <summary>Awaits completion of a class-based sync command with default payload and cancellation token.</summary>
+        public UniTask<ExecutionResult> ExecuteAsync(CommandBase<T> cmd, CancellationToken cancellationToken)
+            => ExecuteAsync(cmd, default, cancellationToken);
+
+        /// <summary>Shortcut: awaits completion of a payload-free sync delegate using default payload.</summary>
+        public UniTask<ExecutionResult> ExecuteAsync(Action execute, Action undo = null, string name = "")
+            => ExecuteAsync(new Command<T>(_ => execute(), undo == null ? null : _ => undo(), name), default, CancellationToken.None);
+
+        /// <summary>Shortcut: awaits completion of a payload-free sync delegate using default payload and cancellation token.</summary>
+        public UniTask<ExecutionResult> ExecuteAsync(Action execute, CancellationToken cancellationToken, Action undo = null, string name = "")
+            => ExecuteAsync(new Command<T>(_ => execute(), undo == null ? null : _ => undo(), name), default, cancellationToken);
+
         /// <summary>Awaits completion of an async lambda command, respecting the configured policy.</summary>
         public UniTask<ExecutionResult> ExecuteAsync(AsyncCommand<T> cmd, T payload)
             => ExecuteAsync(cmd, payload, CancellationToken.None);
@@ -157,6 +197,26 @@ namespace UniTaskCommandBus
             ThrowIfDisposed();
             return SubmitAsync(new AsyncClassCommandAdapter<T>(cmd), payload, GetExecutionPhase(), cancellationToken);
         }
+
+        /// <summary>Awaits completion of an async class-based command with default payload.</summary>
+        public UniTask<ExecutionResult> ExecuteAsync(AsyncCommandBase<T> cmd)
+            => ExecuteAsync(cmd, default, CancellationToken.None);
+
+        /// <summary>Awaits completion of an async class-based command with default payload and cancellation token.</summary>
+        public UniTask<ExecutionResult> ExecuteAsync(AsyncCommandBase<T> cmd, CancellationToken cancellationToken)
+            => ExecuteAsync(cmd, default, cancellationToken);
+
+        /// <summary>Shortcut: awaits completion of a payload-free async delegate using default payload.</summary>
+        public UniTask<ExecutionResult> ExecuteAsync(Func<CancellationToken, UniTask> execute, Func<CancellationToken, UniTask> undo = null, string name = "")
+            => ExecuteAsync(new AsyncCommand<T>((_, ct) => execute(ct), undo == null ? null : (_, ct) => undo(ct), name), default, CancellationToken.None);
+
+        /// <summary>Shortcut: awaits completion of a payload-free async delegate using default payload and cancellation token.</summary>
+        public UniTask<ExecutionResult> ExecuteAsync(Func<CancellationToken, UniTask> execute, CancellationToken cancellationToken, Func<CancellationToken, UniTask> undo = null, string name = "")
+            => ExecuteAsync(new AsyncCommand<T>((_, ct) => execute(ct), undo == null ? null : (_, ct) => undo(ct), name), default, cancellationToken);
+
+        /// <summary>Shortcut: awaits completion of a payload-free, phase-aware async delegate using default payload.</summary>
+        public UniTask<ExecutionResult> ExecuteAsync(Func<ExecutionPhase, CancellationToken, UniTask> execute, Func<CancellationToken, UniTask> undo = null, string name = "")
+            => ExecuteAsync(new AsyncCommand<T>((_, phase, ct) => execute(phase, ct), undo == null ? null : (_, ct) => undo(ct), name), default, CancellationToken.None);
 
         // ── Cancel / CancelAll ───────────────────────────────────────────────
 

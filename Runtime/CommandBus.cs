@@ -7,6 +7,12 @@ namespace UniTaskCommandBus
     public static class CommandBus
     {
         /// <summary>
+        /// Creates a new builder for a payload-free invoker.
+        /// This is shorthand for <c>Create&lt;CommandUnit&gt;()</c>.
+        /// </summary>
+        public static InvokerBuilder<CommandUnit> Create() => Create<CommandUnit>();
+
+        /// <summary>
         /// Creates a new builder for an invoker with the given payload type <typeparamref name="T"/>.
         /// Chain <c>.WithPolicy(...)</c>, optionally <c>.WithHistory(...)</c>, then <c>.Build()</c>.
         /// </summary>

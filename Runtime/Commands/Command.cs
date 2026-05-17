@@ -3,6 +3,27 @@ using System;
 namespace UniTaskCommandBus
 {
     /// <summary>
+    /// A payload-free synchronous lambda command.
+    /// Internally this is a <see cref="Command{T}"/> using <see cref="CommandUnit"/>.
+    /// </summary>
+    public class Command : Command<CommandUnit>
+    {
+        /// <summary>Creates a payload-free command from a simple execute delegate.</summary>
+        public Command(Action execute, Action undo = null, string name = "")
+            : base(_ => execute(), undo == null ? null : _ => undo(), name)
+        {
+            if (execute == null) throw new ArgumentNullException(nameof(execute));
+        }
+
+        /// <summary>Creates a payload-free command from a phase-aware execute delegate.</summary>
+        public Command(Action<ExecutionPhase> execute, Action undo = null, string name = "")
+            : base((_, phase) => execute(phase), undo == null ? null : _ => undo(), name)
+        {
+            if (execute == null) throw new ArgumentNullException(nameof(execute));
+        }
+    }
+
+    /// <summary>
     /// A synchronous lambda command. Wraps execute and undo delegates.
     /// </summary>
     public class Command<T>

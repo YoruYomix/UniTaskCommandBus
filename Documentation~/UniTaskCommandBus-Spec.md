@@ -41,7 +41,7 @@ using UniTaskCommandBus;
 
 ```csharp
 // 히스토리 없이 단순 실행만 (await도 그대로 가능)
-var runner = CommandBus.Create<CommandUnit>()
+var runner = CommandBus.Create()
     .WithPolicy(AsyncPolicy.Sequential)
     .Build();
 await runner.ExecuteAsync(saveCmd);
@@ -68,6 +68,7 @@ Invoker는 `CommandBus` 팩토리의 빌더 패턴으로 생성한다. 지금은
 // 팩토리 — 진입점
 public static class CommandBus
 {
+    public static InvokerBuilder<CommandUnit> Create();
     public static InvokerBuilder<T> Create<T>();
 }
 
@@ -102,10 +103,10 @@ public class HistoryInvokerBuilder<T>
 
 `T`는 커맨드 실행 시 넘기는 **인자(payload) 타입**이다. 커맨드 로직과 인자(데이터)를 분리하여, 커맨드 하나를 서로 다른 `T` 값으로 여러 번 재사용할 수 있다.
 
-**인자가 필요 없는 경우** — 라이브러리가 제공하는 `CommandUnit` 타입을 사용한다.
+**인자가 필요 없는 경우** — `CommandBus.Create()`를 사용한다. 내부 타입은 `CommandUnit`이지만, 일반 사용자는 직접 넘길 필요가 없다.
 
 ```csharp
-var runner = CommandBus.Create<CommandUnit>().Build();
+var runner = CommandBus.Create().Build();
 ```
 
 **인자가 필요한 경우** — **record**를 정의해서 `T`로 넘긴다. payload는 "어떤 값으로 뭘 할지"를 담는 불변 데이터이므로, record의 값 기반 비교 / 불변성 / 간결한 선언이 잘 맞는다.
@@ -122,11 +123,11 @@ var editor = CommandBus.Create<SlotAssignment>()
 
 ```csharp
 // 히스토리 없는 단순 Invoker (모두 기본값)
-var runner = CommandBus.Create<CommandUnit>().Build();
+var runner = CommandBus.Create().Build();
 // → Invoker<CommandUnit>, Sequential
 
 // 정책만 커스텀
-var burst = CommandBus.Create<CommandUnit>()
+var burst = CommandBus.Create()
     .WithPolicy(AsyncPolicy.Drop)
     .Build();
 // → Invoker<CommandUnit>, Drop
@@ -224,7 +225,34 @@ execute: async (_, ct) =>
 
 ### 람다 커맨드 타입 시그니처
 
-동기/비동기에 따라 두 타입이 제공된다.
+동기/비동기에 따라 두 타입이 제공된다. payload가 없는 경우에는 비제네릭 `Command` / `AsyncCommand`를 사용한다.
+
+**`Command` (payload 없는 동기)**
+```csharp
+public class Command : Command<CommandUnit>
+{
+    public Command(Action execute, Action undo = null, string name = "");
+    public Command(Action<ExecutionPhase> execute, Action undo = null, string name = "");
+}
+```
+
+**`AsyncCommand` (payload 없는 비동기)**
+```csharp
+public class AsyncCommand : AsyncCommand<CommandUnit>
+{
+    public AsyncCommand(
+        Func<CancellationToken, UniTask> execute,
+        Func<CancellationToken, UniTask> undo = null,
+        string name = ""
+    );
+
+    public AsyncCommand(
+        Func<ExecutionPhase, CancellationToken, UniTask> execute,
+        Func<CancellationToken, UniTask> undo = null,
+        string name = ""
+    );
+}
+```
 
 **`Command<T>` (동기)**
 ```csharp
@@ -272,16 +300,16 @@ public class AsyncCommand<T>
 
 phase가 필요 없으면 기본 생성자를 쓰고, 필요할 때만 phase 버전을 쓴다. `undo`는 어느 쪽이든 phase를 받지 않는다 (Undo는 단계 구분이 없으므로). `undo`를 생략하면 아무것도 하지 않는 빈 동작이 기본값으로 사용된다.
 
-### payload가 필요 없는 경우 (`CommandUnit`)
+### payload가 필요 없는 경우
 
-payload가 없으므로 람다 인자를 `_`로 무시한다.
+payload가 없을 때는 `CommandBus.Create()`와 비제네릭 `Command` / `AsyncCommand`를 사용한다. 내부적으로는 `CommandUnit`을 쓰지만, 실행할 때마다 사용자가 직접 넘기지 않아도 된다.
 
 ```csharp
-var invoker = CommandBus.Create<CommandUnit>().Build();
+var invoker = CommandBus.Create().Build();
 
-invoker.Execute(new Command<CommandUnit>(
-    execute: _ => player.position += Vector3.right,
-    undo:    _ => player.position -= Vector3.right
+invoker.Execute(new Command(
+    execute: () => player.position += Vector3.right,
+    undo:    () => player.position -= Vector3.right
 ));
 ```
 
@@ -289,8 +317,8 @@ invoker.Execute(new Command<CommandUnit>(
 
 ```csharp
 invoker.Execute(
-    execute: _ => player.position += Vector3.right,
-    undo:    _ => player.position -= Vector3.right
+    execute: () => player.position += Vector3.right,
+    undo:    () => player.position -= Vector3.right
 );
 ```
 
@@ -317,10 +345,35 @@ invoker.Execute(placeCmd, new SlotAssignment(unitId: 3, slotIndex: 5));
 
 커맨드의 로직이 복잡해지거나, 상태를 보관해야 하거나, 재사용이 필요해지면 베이스 클래스를 상속하여 확장한다. 동기/비동기에 따라 상속할 베이스가 나뉜다.
 
-- **동기 커맨드**: `CommandBase<T>` 상속
-- **비동기 커맨드**: `AsyncCommandBase<T>` 상속
+- **payload 없는 동기 커맨드**: `CommandBase` 상속
+- **payload 없는 비동기 커맨드**: `AsyncCommandBase` 상속
+- **payload 있는 동기 커맨드**: `CommandBase<T>` 상속
+- **payload 있는 비동기 커맨드**: `AsyncCommandBase<T>` 상속
 
-`T`는 Invoker와 동일한 payload 타입이다.
+`T`는 Invoker와 동일한 payload 타입이다. payload가 없으면 비제네릭 베이스가 `CommandUnit` 어댑트를 대신 처리한다.
+
+### payload 없는 동기 커맨드 — `CommandBase`
+
+```csharp
+public abstract class CommandBase : CommandBase<CommandUnit>
+{
+    public abstract void Execute();
+    public virtual void Execute(ExecutionPhase phase) => Execute();
+    public virtual void Undo() { }
+}
+```
+
+### payload 없는 비동기 커맨드 — `AsyncCommandBase`
+
+```csharp
+public abstract class AsyncCommandBase : AsyncCommandBase<CommandUnit>
+{
+    public abstract UniTask ExecuteAsync(CancellationToken ct);
+    public virtual UniTask ExecuteAsync(ExecutionPhase phase, CancellationToken ct)
+        => ExecuteAsync(ct);
+    public virtual UniTask UndoAsync(CancellationToken ct) => UniTask.CompletedTask;
+}
+```
 
 ### 동기 커맨드 — `CommandBase<T>`
 
@@ -1256,9 +1309,9 @@ invoker.OnHistoryChanged += (action, index, name) =>
 
 ```csharp
 // 고정 이름
-var saveCmd = new Command<CommandUnit>(
-    execute: _ => SaveToFile(),
-    undo:    _ => RestoreFromBackup(),
+var saveCmd = new Command(
+    execute: () => SaveToFile(),
+    undo:    () => RestoreFromBackup(),
     name:    "Save Document"
 );
 
@@ -1281,11 +1334,11 @@ invoker.Execute(placeCmd, new SlotAssignment(unitId, slotIndex));
 
 ```csharp
 // 고정 이름
-public class SaveCommand : CommandBase<CommandUnit>
+public class SaveCommand : CommandBase
 {
     public override string Name => "Save Document";
-    public override void Execute(CommandUnit _) { /* ... */ }
-    public override void Undo(CommandUnit _) { /* ... */ }
+    public override void Execute() { /* ... */ }
+    public override void Undo() { /* ... */ }
 }
 
 // 생성자로 받은 값을 조립한 동적 이름
@@ -1367,7 +1420,7 @@ Invoker를 갓 생성했거나 모든 커맨드를 `Pop()` 등으로 제거한 �
 `CurrentIndex`가 `-1`인 것은 "어떤 커맨드도 아직 적용되지 않은 초기 상태"를 의미한다. 유효한 포인터 값은 `0 <= CurrentIndex < HistoryCount` 범위이며, `-1`은 이 범위 밖의 **초기/빈 상태 표식**이다.
 
 ```csharp
-var invoker = CommandBus.Create<CommandUnit>().WithHistory().Build();
+var invoker = CommandBus.Create().WithHistory().Build();
 
 invoker.HistoryCount;  // 0
 invoker.CurrentIndex;  // -1
@@ -1471,10 +1524,10 @@ void OnHistoryItemClicked(int clickedIndex)
 
 ```csharp
 // Step 1: 프로토타입 — 람다, payload 없음
-var invoker = CommandBus.Create<CommandUnit>().Build();
+var invoker = CommandBus.Create().Build();
 invoker.Execute(
-    execute: _ => player.position += Vector3.right,
-    undo:    _ => player.position -= Vector3.right
+    execute: () => player.position += Vector3.right,
+    undo:    () => player.position -= Vector3.right
 );
 
 // Step 2: 데이터가 달라지기 시작 — payload 도입

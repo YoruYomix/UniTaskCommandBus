@@ -41,7 +41,7 @@ The library provides **two Invoker types suited to different use cases.** Both a
 
 ```csharp
 // Simple execution without history (await is still fully supported)
-var runner = CommandBus.Create<CommandUnit>()
+var runner = CommandBus.Create()
     .WithPolicy(AsyncPolicy.Sequential)
     .Build();
 await runner.ExecuteAsync(saveCmd);
@@ -68,6 +68,7 @@ Invokers are created through a builder pattern on the `CommandBus` factory. This
 // Factory — entry point
 public static class CommandBus
 {
+    public static InvokerBuilder<CommandUnit> Create();
     public static InvokerBuilder<T> Create<T>();
 }
 
@@ -102,10 +103,10 @@ Options not specified in the builder use the defaults above.
 
 `T` is the **payload type** passed when executing a command. Separating the command logic from its argument data allows a single command to be reused across multiple executions with different `T` values.
 
-**When no argument is needed** — use the library-provided `CommandUnit` type.
+**When no argument is needed** — use `CommandBus.Create()`. The internal payload type is `CommandUnit`, but users do not need to pass it manually.
 
 ```csharp
-var runner = CommandBus.Create<CommandUnit>().Build();
+var runner = CommandBus.Create().Build();
 ```
 
 **When an argument is needed** — define a **record** and pass it as `T`. Payloads are immutable data representing "what to do with which values," which maps naturally onto records' value-based equality, immutability, and concise declaration.
@@ -122,11 +123,11 @@ var editor = CommandBus.Create<SlotAssignment>()
 
 ```csharp
 // Simple Invoker without history (all defaults)
-var runner = CommandBus.Create<CommandUnit>().Build();
+var runner = CommandBus.Create().Build();
 // → Invoker<CommandUnit>, Sequential
 
 // Custom policy only
-var burst = CommandBus.Create<CommandUnit>()
+var burst = CommandBus.Create()
     .WithPolicy(AsyncPolicy.Drop)
     .Build();
 // → Invoker<CommandUnit>, Drop
@@ -224,7 +225,34 @@ The simplest form. Define a command directly as a lambda — no separate class f
 
 ### Lambda Command Type Signatures
 
-Two types are provided, for synchronous and asynchronous use.
+Two types are provided for synchronous and asynchronous use. When there is no payload, use the non-generic `Command` / `AsyncCommand` types.
+
+**`Command` (payload-free synchronous)**
+```csharp
+public class Command : Command<CommandUnit>
+{
+    public Command(Action execute, Action undo = null, string name = "");
+    public Command(Action<ExecutionPhase> execute, Action undo = null, string name = "");
+}
+```
+
+**`AsyncCommand` (payload-free asynchronous)**
+```csharp
+public class AsyncCommand : AsyncCommand<CommandUnit>
+{
+    public AsyncCommand(
+        Func<CancellationToken, UniTask> execute,
+        Func<CancellationToken, UniTask> undo = null,
+        string name = ""
+    );
+
+    public AsyncCommand(
+        Func<ExecutionPhase, CancellationToken, UniTask> execute,
+        Func<CancellationToken, UniTask> undo = null,
+        string name = ""
+    );
+}
+```
 
 **`Command<T>` (synchronous)**
 ```csharp
@@ -272,16 +300,16 @@ public class AsyncCommand<T>
 
 Use the basic constructor when the phase is not needed; use the phase overload only when required. In either case `undo` does not receive a phase (Undo has no phase distinction). Omitting `undo` results in a no-op default.
 
-### When No Payload Is Needed (`CommandUnit`)
+### When No Payload Is Needed
 
-When there is no payload, ignore the lambda argument with `_`.
+When there is no payload, use `CommandBus.Create()` and the non-generic `Command` / `AsyncCommand` types. Internally this still uses `CommandUnit`, but callers do not need to pass it on every execution.
 
 ```csharp
-var invoker = CommandBus.Create<CommandUnit>().Build();
+var invoker = CommandBus.Create().Build();
 
-invoker.Execute(new Command<CommandUnit>(
-    execute: _ => player.position += Vector3.right,
-    undo:    _ => player.position -= Vector3.right
+invoker.Execute(new Command(
+    execute: () => player.position += Vector3.right,
+    undo:    () => player.position -= Vector3.right
 ));
 ```
 
@@ -289,8 +317,8 @@ Using the shortcut method for brevity:
 
 ```csharp
 invoker.Execute(
-    execute: _ => player.position += Vector3.right,
-    undo:    _ => player.position -= Vector3.right
+    execute: () => player.position += Vector3.right,
+    undo:    () => player.position -= Vector3.right
 );
 ```
 
@@ -317,10 +345,35 @@ invoker.Execute(placeCmd, new SlotAssignment(unitId: 3, slotIndex: 5));
 
 When command logic becomes complex, requires state, or needs to be reused, extend a base class. There are separate bases for synchronous and asynchronous commands.
 
-- **Synchronous commands**: subclass `CommandBase<T>`
-- **Asynchronous commands**: subclass `AsyncCommandBase<T>`
+- **Payload-free synchronous commands**: subclass `CommandBase`
+- **Payload-free asynchronous commands**: subclass `AsyncCommandBase`
+- **Payload-based synchronous commands**: subclass `CommandBase<T>`
+- **Payload-based asynchronous commands**: subclass `AsyncCommandBase<T>`
 
-`T` is the same payload type as the Invoker.
+`T` is the same payload type as the Invoker. When there is no payload, the non-generic bases adapt to `CommandUnit` internally.
+
+### Payload-Free Synchronous Commands — `CommandBase`
+
+```csharp
+public abstract class CommandBase : CommandBase<CommandUnit>
+{
+    public abstract void Execute();
+    public virtual void Execute(ExecutionPhase phase) => Execute();
+    public virtual void Undo() { }
+}
+```
+
+### Payload-Free Asynchronous Commands — `AsyncCommandBase`
+
+```csharp
+public abstract class AsyncCommandBase : AsyncCommandBase<CommandUnit>
+{
+    public abstract UniTask ExecuteAsync(CancellationToken ct);
+    public virtual UniTask ExecuteAsync(ExecutionPhase phase, CancellationToken ct)
+        => ExecuteAsync(ct);
+    public virtual UniTask UndoAsync(CancellationToken ct) => UniTask.CompletedTask;
+}
+```
 
 ### Synchronous Commands — `CommandBase<T>`
 
@@ -1256,9 +1309,9 @@ Lambda commands pass a `string name` to the constructor (default `""`).
 
 ```csharp
 // Fixed name
-var saveCmd = new Command<CommandUnit>(
-    execute: _ => SaveToFile(),
-    undo:    _ => RestoreFromBackup(),
+var saveCmd = new Command(
+    execute: () => SaveToFile(),
+    undo:    () => RestoreFromBackup(),
     name:    "Save Document"
 );
 
@@ -1281,11 +1334,11 @@ Class commands override the `Name` property of `CommandBase<T>` / `AsyncCommandB
 
 ```csharp
 // Fixed name
-public class SaveCommand : CommandBase<CommandUnit>
+public class SaveCommand : CommandBase
 {
     public override string Name => "Save Document";
-    public override void Execute(CommandUnit _) { /* ... */ }
-    public override void Undo(CommandUnit _) { /* ... */ }
+    public override void Execute() { /* ... */ }
+    public override void Undo() { /* ... */ }
 }
 
 // Dynamic name assembled from constructor arguments
@@ -1367,7 +1420,7 @@ When an Invoker has just been created or all commands have been removed via `Pop
 `CurrentIndex == -1` means "no command has been applied yet — initial state." Valid pointer values are in the range `0 <= CurrentIndex < HistoryCount`; `-1` is the **initial/empty-state marker** outside that range.
 
 ```csharp
-var invoker = CommandBus.Create<CommandUnit>().WithHistory().Build();
+var invoker = CommandBus.Create().WithHistory().Build();
 
 invoker.HistoryCount;  // 0
 invoker.CurrentIndex;  // -1
@@ -1469,10 +1522,10 @@ The recommended approach is to implement quickly with lambdas in the prototype p
 
 ```csharp
 // Step 1: Prototype — lambda, no payload
-var invoker = CommandBus.Create<CommandUnit>().Build();
+var invoker = CommandBus.Create().Build();
 invoker.Execute(
-    execute: _ => player.position += Vector3.right,
-    undo:    _ => player.position -= Vector3.right
+    execute: () => player.position += Vector3.right,
+    undo:    () => player.position -= Vector3.right
 );
 
 // Step 2: Data starts to vary — introduce payload

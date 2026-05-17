@@ -491,9 +491,9 @@ var placeCmd = new AsyncCommand<SlotAssignment>(
 await invoker.ExecuteAsync(placeCmd, new SlotAssignment(3, 5));
 ```
 
-### 취소 관리 — `invoker.Cancel()`
+### 취소 관리 — `invoker.Cancel()`과 외부 토큰
 
-비동기 처리에서 취소 토큰을 매번 수동으로 생성/전달/파기하는 것은 번거롭다. 이 라이브러리에서는 **Invoker가 내부적으로 `CancellationToken`을 보관**하고, 사용자는 간단히 한 줄로 취소할 수 있다.
+비동기 처리에서 취소 토큰을 매번 수동으로 생성/전달/파기하는 것은 대개 번거롭다. 이 라이브러리에서는 **Invoker가 내부적으로 `CancellationToken`을 보관**하고, 사용자는 간단히 한 줄로 취소할 수 있다.
 
 ```csharp
 invoker.Cancel();
@@ -502,12 +502,24 @@ invoker.Cancel();
 이 호출은 현재 실행 중인 비동기 커맨드를 취소한다. 람다의 `ct` 인자는 Invoker가 내부에서 주입한 토큰이다.
 
 ```csharp
-// 사용자가 직접 CancellationToken을 만들거나 전달할 필요 없음
+// 일반적인 경우 사용자가 직접 CancellationToken을 만들거나 전달할 필요 없음
 await invoker.ExecuteAsync(placeCmd, new SlotAssignment(3, 5));
 
 // 어딘가에서 취소하고 싶을 때
 invoker.Cancel();
 ```
+
+호출 지점에 묶인 취소가 필요하다면 `ExecuteAsync`, `UndoAsync`, `RedoAsync`에 외부 `CancellationToken`을 넘길 수 있다.
+
+```csharp
+using var cts = new CancellationTokenSource();
+
+await invoker.ExecuteAsync(placeCmd, new SlotAssignment(3, 5), cts.Token);
+await historyInvoker.UndoAsync(cts.Token);
+await historyInvoker.RedoAsync(cts.Token);
+```
+
+외부 토큰이 취소되면 `Cancel()`과 같은 공유 취소 경로를 탄다. 진행 중인 작업은 커맨드 람다의 `ct`를 통해 취소되고, 대기열은 유지되며, await 중인 호출은 `OperationCanceledException`을 던지지 않고 `ExecutionResult.Cancelled`로 완료된다. 이는 "이 람다 하나만을 위한 비공개 토큰"이 아니라 Invoker 단위 취소 의도로 취급된다.
 
 이 방식의 이점:
 
@@ -543,8 +555,11 @@ invoker.CancelAll();
 ```csharp
 // 어떤 경우든 동일하게 취소 가능
 await invoker.ExecuteAsync(cmd, payload);   // → Cancel() / CancelAll()로 취소
+await invoker.ExecuteAsync(cmd, payload, ct); // → 토큰 취소도 Cancel()처럼 동작
 await invoker.UndoAsync();                  // → Cancel() / CancelAll()로 취소
+await invoker.UndoAsync(ct);                // → 토큰 취소도 Cancel()처럼 동작
 await invoker.RedoAsync();                  // → Cancel() / CancelAll()로 취소
+await invoker.RedoAsync(ct);                // → 토큰 취소도 Cancel()처럼 동작
 ```
 
 즉 사용자는 "지금 무슨 방향의 작업이 돌고 있는지" 신경 쓸 필요 없이, **"멈춰"라는 의도만 표현하면 된다.** 이는 취소 토큰이 Invoker 단위로 관리되는 설계와 자연스럽게 맞물린다.
@@ -632,12 +647,13 @@ public enum ExecutionResult
 | `Parallel` | 바로 실행 | **실행 완료**까지 대기 | `Completed` |
 | `Parallel` | 여러 개 동시 실행 중 `Cancel()` 호출됨 | **모든 진행 중 커맨드가 각각 취소되는 순간** | 각각 `Cancelled` |
 | (공통) | `Cancel()` / `CancelAll()` 호출됨 | **취소되는 순간** | `Cancelled` |
+| (공통) | `ExecuteAsync`에 넘긴 외부 `CancellationToken`이 취소됨 | **공유 취소가 이 호출에 도달하는 순간** | `Cancelled` |
 
 핵심 원칙: **"내가 호출한 이 Execute가 끝났는가?"**가 await의 기준이다. 큐에서 대기하다가 결국 실행되어 끝나면 그때까지 기다리고, 정책에 의해 버려지거나 취소되면 그 순간 끝난다.
 
 **취소 vs 드롭 구분 규칙:**
 - **`Dropped`**: 정책 자체의 정상 동작으로 "실행하지 않기로 결정"된 경우 (Drop 거부, ThrottleLast 중간값 대체)
-- **`Cancelled`**: 외부 취소 API(`Cancel`/`CancelAll`) 또는 Switch에 의해 중단된 경우 (실행 중이든, 대기 중이든 동일하게 `Cancelled`)
+- **`Cancelled`**: 외부 취소 API(`Cancel`/`CancelAll`), 전달된 `CancellationToken`, 또는 Switch에 의해 중단된 경우 (실행 중이든, 대기 중이든 동일하게 `Cancelled`)
 
 대기열에 있던 커맨드가 `CancelAll()`로 제거되는 경우는 "실행 의도가 있었으나 외부 개입으로 중단됨"이므로 `Cancelled`로 분류한다.
 
@@ -721,6 +737,13 @@ invoker.Undo();
 // 모든 스텝이 완료되길 원한다면 사용자가 await로 제어
 await invoker.UndoAsync();
 await invoker.UndoAsync();
+```
+
+`UndoAsync`와 `RedoAsync`도 `CancellationToken` 오버로드를 제공한다. 토큰이 취소되면 `Cancel()`처럼 동작하며, await 중인 작업은 `ExecutionResult.Cancelled`로 완료된다.
+
+```csharp
+await invoker.UndoAsync(ct);
+await invoker.RedoAsync(ct);
 ```
 
 ### 실행 단계 구분 — `ExecutionPhase`
@@ -877,6 +900,8 @@ Execute, Undo, Redo 모두 **"진행 중인 작업 취소 → 상태 변경 → 
 
 Undo와 Redo는 **항상 Switch 정책**이므로 (위의 "Undo/Redo는 항상 `Switch`" 참고) 언제나 이 3단계를 그대로 따른다. Execute는 `AsyncPolicy` 설정에 따라 **1단계의 동작이 달라진다:**
 
+`ExecuteAsync`, `UndoAsync`, `RedoAsync`에 전달된 외부 `CancellationToken`이 호출 시작 전에 이미 취소되어 있다면 히스토리 상태를 바꾸지 않고 `ExecutionResult.Cancelled`를 반환한다. 실행이 시작된 뒤 토큰이 취소되면 일반적인 공유 취소 경로를 따르므로, 이미 일어난 히스토리 상태 변경은 유지된다.
+
 | 정책 | Execute의 1단계 동작 |
 |---|---|
 | `Switch` | 진행 중 작업을 취소 (Undo/Redo와 동일) |
@@ -912,9 +937,11 @@ Undo와 Redo는 **항상 Switch 정책**이므로 (위의 "Undo/Redo는 항상 `
 | `ThrottleLast`에서 중간값으로 덮어써져 버려짐 | **적재 안 됨** | `Dropped` |
 | `Sequential` 큐에서 대기 중 `CancelAll()`로 제거됨 | **적재 안 됨** | `Cancelled` |
 | `ThrottleLast`의 "마지막 값" 슬롯이 `CancelAll()`로 제거됨 | **적재 안 됨** | `Cancelled` |
+| `ExecuteAsync` 시작 전에 외부 토큰이 이미 취소됨 | **적재 안 됨** | `Cancelled` |
 | `Sequential` 큐에서 대기하다가 자기 차례가 와서 실행됨 | **적재됨** (실행 시작 시점에) | `Completed` |
 | `Switch`로 취소된 이전 커맨드 (이미 람다가 돌기 시작함) | **적재됨** (Undo 대상) | `Cancelled` |
 | `Parallel`로 동시 실행 중 `Cancel()`로 중단 | **적재됨** (각각) | 각각 `Cancelled` |
+| 실행 시작 뒤 외부 토큰이 취소됨 | **적재됨** (이미 실행에 들어갔으므로) | `Cancelled` |
 | 람다 내부에서 예외 throw | **적재됨** (이미 실행에 들어갔으므로) | 예외 그대로 전파 |
 
 핵심 기준은 **"`execute` 람다가 한 번이라도 호출되기 시작했는가"**이다. 호출 시작 직전에 적재가 일어나고, 그 직후에 람다가 돈다. 이 두 스텝은 한 묶음이며, 적재 없이 실행되거나 실행 없이 적재되는 경우는 없다.

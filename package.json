@@ -45,7 +45,7 @@
     },
     {
       "displayName": "Stage 07 - Fault Tolerance",
-      "description": "Regression tests for exception handling: Faulted result, policy flag resets via finally, Sequential/ThrottleLast loop continuation after fault",
+      "description": "Regression tests for exception handling and cancellation tokens: Faulted result, policy flag resets, Sequential/ThrottleLast continuation, ExecuteAsync/UndoAsync/RedoAsync token cancellation",
       "path": "Samples~/Stage07_FaultTolerance"
     }
   ]

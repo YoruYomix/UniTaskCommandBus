@@ -100,38 +100,62 @@ namespace UniTaskCommandBus
 
         /// <summary>Awaits completion of a sync lambda command, respecting the configured policy.</summary>
         public UniTask<ExecutionResult> ExecuteAsync(Command<T> cmd, T payload)
+            => ExecuteAsync(cmd, payload, CancellationToken.None);
+
+        /// <summary>Awaits completion of a sync lambda command, respecting the configured policy and cancellation token.</summary>
+        public UniTask<ExecutionResult> ExecuteAsync(Command<T> cmd, T payload, CancellationToken cancellationToken)
         {
             ThrowIfDisposed();
-            return SubmitAsync(new SyncCommandAdapter<T>(cmd), payload, GetExecutionPhase());
+            return SubmitAsync(new SyncCommandAdapter<T>(cmd), payload, GetExecutionPhase(), cancellationToken);
         }
 
         /// <summary>Awaits completion of a sync lambda command with default payload.</summary>
         public UniTask<ExecutionResult> ExecuteAsync(Command<T> cmd)
-            => ExecuteAsync(cmd, default);
+            => ExecuteAsync(cmd, default, CancellationToken.None);
+
+        /// <summary>Awaits completion of a sync lambda command with default payload and cancellation token.</summary>
+        public UniTask<ExecutionResult> ExecuteAsync(Command<T> cmd, CancellationToken cancellationToken)
+            => ExecuteAsync(cmd, default, cancellationToken);
 
         /// <summary>Awaits completion of a class-based sync command, respecting the configured policy.</summary>
         public UniTask<ExecutionResult> ExecuteAsync(CommandBase<T> cmd, T payload)
+            => ExecuteAsync(cmd, payload, CancellationToken.None);
+
+        /// <summary>Awaits completion of a class-based sync command, respecting the configured policy and cancellation token.</summary>
+        public UniTask<ExecutionResult> ExecuteAsync(CommandBase<T> cmd, T payload, CancellationToken cancellationToken)
         {
             ThrowIfDisposed();
-            return SubmitAsync(new SyncClassCommandAdapter<T>(cmd), payload, GetExecutionPhase());
+            return SubmitAsync(new SyncClassCommandAdapter<T>(cmd), payload, GetExecutionPhase(), cancellationToken);
         }
 
         /// <summary>Awaits completion of an async lambda command, respecting the configured policy.</summary>
         public UniTask<ExecutionResult> ExecuteAsync(AsyncCommand<T> cmd, T payload)
+            => ExecuteAsync(cmd, payload, CancellationToken.None);
+
+        /// <summary>Awaits completion of an async lambda command, respecting the configured policy and cancellation token.</summary>
+        public UniTask<ExecutionResult> ExecuteAsync(AsyncCommand<T> cmd, T payload, CancellationToken cancellationToken)
         {
             ThrowIfDisposed();
-            return SubmitAsync(new AsyncCommandAdapter<T>(cmd), payload, GetExecutionPhase());
+            return SubmitAsync(new AsyncCommandAdapter<T>(cmd), payload, GetExecutionPhase(), cancellationToken);
         }
 
         /// <summary>Awaits completion of an async lambda command with default payload.</summary>
         public UniTask<ExecutionResult> ExecuteAsync(AsyncCommand<T> cmd)
-            => ExecuteAsync(cmd, default);
+            => ExecuteAsync(cmd, default, CancellationToken.None);
+
+        /// <summary>Awaits completion of an async lambda command with default payload and cancellation token.</summary>
+        public UniTask<ExecutionResult> ExecuteAsync(AsyncCommand<T> cmd, CancellationToken cancellationToken)
+            => ExecuteAsync(cmd, default, cancellationToken);
 
         /// <summary>Awaits completion of an async class-based command, respecting the configured policy.</summary>
         public UniTask<ExecutionResult> ExecuteAsync(AsyncCommandBase<T> cmd, T payload)
+            => ExecuteAsync(cmd, payload, CancellationToken.None);
+
+        /// <summary>Awaits completion of an async class-based command, respecting the configured policy and cancellation token.</summary>
+        public UniTask<ExecutionResult> ExecuteAsync(AsyncCommandBase<T> cmd, T payload, CancellationToken cancellationToken)
         {
             ThrowIfDisposed();
-            return SubmitAsync(new AsyncClassCommandAdapter<T>(cmd), payload, GetExecutionPhase());
+            return SubmitAsync(new AsyncClassCommandAdapter<T>(cmd), payload, GetExecutionPhase(), cancellationToken);
         }
 
         // ── Cancel / CancelAll ───────────────────────────────────────────────
@@ -190,6 +214,12 @@ namespace UniTaskCommandBus
             old.Dispose();
         }
 
+        private void CancelFromExternalToken()
+        {
+            if (_disposed) return;
+            ReplaceCts();
+        }
+
         private ExecutionResult ExecuteFireAndForget(ICommand<T> cmd, T payload, ExecutionPhase phase)
         {
             var entry = new QueueEntry<T>(cmd, payload, phase);
@@ -198,11 +228,35 @@ namespace UniTaskCommandBus
             return result;
         }
 
-        private UniTask<ExecutionResult> SubmitAsync(ICommand<T> cmd, T payload, ExecutionPhase phase)
+        private UniTask<ExecutionResult> SubmitAsync(ICommand<T> cmd, T payload, ExecutionPhase phase, CancellationToken cancellationToken)
         {
-            var entry = new QueueEntry<T>(cmd, payload, phase);
+            if (cancellationToken.IsCancellationRequested)
+            {
+                CancelFromExternalToken();
+                return UniTask.FromResult(ExecutionResult.Cancelled);
+            }
+
+            var entry = new QueueEntry<T>(cmd, payload, phase, cancellationToken);
+            CancellationTokenRegistration registration = default;
+            if (cancellationToken.CanBeCanceled)
+                registration = cancellationToken.Register(static state => ((Invoker<T>)state).CancelFromExternalToken(), this);
+
             SubmitEntry(entry);
-            return entry.CompletionSource.Task;
+            return AwaitWithCancellationRegistration(entry.CompletionSource.Task, registration);
+        }
+
+        private static async UniTask<ExecutionResult> AwaitWithCancellationRegistration(
+            UniTask<ExecutionResult> task,
+            CancellationTokenRegistration registration)
+        {
+            try
+            {
+                return await task;
+            }
+            finally
+            {
+                registration.Dispose();
+            }
         }
 
         private ExecutionResult SubmitEntry(QueueEntry<T> entry)
@@ -314,10 +368,19 @@ namespace UniTaskCommandBus
         /// </summary>
         private protected async UniTask<ExecutionResult> RunLambdaCore(QueueEntry<T> entry)
         {
+            if (entry.CancellationToken.IsCancellationRequested)
+                return ExecutionResult.Cancelled;
+
             OnBeforeExecute(entry.Command, entry.Payload, entry.Command.GetName());
             try
             {
-                await entry.Command.InvokeExecute(entry.Payload, entry.Phase, _cts.Token);
+                using (var linkedCts = entry.CancellationToken.CanBeCanceled
+                    ? CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, entry.CancellationToken)
+                    : null)
+                {
+                    var token = linkedCts?.Token ?? _cts.Token;
+                    await entry.Command.InvokeExecute(entry.Payload, entry.Phase, token);
+                }
                 return ExecutionResult.Completed;
             }
             catch (OperationCanceledException)

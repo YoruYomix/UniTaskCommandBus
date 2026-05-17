@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 
@@ -48,6 +49,8 @@ namespace UniTaskCommandBus.Samples
             await Test7_HistoryInvoker_HistoryPreservedAfterFault();
             await Test8_Parallel_FaultIsolation();
             await Test9_OnError_EventFires();
+            await Test10_ExecuteAsync_CancellationTokenMatchesCancel();
+            await Test11_UndoRedoAsync_CancellationTokenMatchesCancel();
 
             string icon = _failed == 0 ? "✅" : "❌";
             Debug.Log($"[Stage07] {icon} 완료 — {_passed}개 통과 / {_failed}개 실패");
@@ -326,6 +329,87 @@ namespace UniTaskCommandBus.Samples
                 Fail("테스트9 OnError 이벤트",
                     $"result={result}, captured={captured?.Message ?? "null"}");
 
+            invoker.Dispose();
+        }
+
+        // ── Test 10 ──────────────────────────────────────────────────────────
+
+        private async UniTask Test10_ExecuteAsync_CancellationTokenMatchesCancel()
+        {
+            Debug.Log("[Stage07] ▶ 테스트 10: ExecuteAsync CancellationToken — Cancel()과 동일하게 실행 중 작업 취소");
+            var invoker = CommandBus.Create<CommandUnit>().WithPolicy(AsyncPolicy.Parallel).Build();
+            var cts = new CancellationTokenSource();
+
+            var cmdA = new AsyncCommand<CommandUnit>(async (_, ct) =>
+            {
+                await UniTask.Delay(1000, cancellationToken: ct);
+            });
+            var cmdB = new AsyncCommand<CommandUnit>(async (_, ct) =>
+            {
+                await UniTask.Delay(1000, cancellationToken: ct);
+            });
+
+            var tA = invoker.ExecuteAsync(cmdA, cts.Token);
+            var tB = invoker.ExecuteAsync(cmdB);
+
+            await UniTask.Delay(50);
+            cts.Cancel();
+
+            var (rA, rB) = await UniTask.WhenAll(tA, tB);
+
+            if (rA == ExecutionResult.Cancelled && rB == ExecutionResult.Cancelled)
+                Pass("테스트10 ExecuteAsync 토큰 취소");
+            else
+                Fail("테스트10 ExecuteAsync 토큰 취소", $"A={rA}, B={rB}");
+
+            cts.Dispose();
+            invoker.Dispose();
+        }
+
+        // ── Test 11 ──────────────────────────────────────────────────────────
+
+        private async UniTask Test11_UndoRedoAsync_CancellationTokenMatchesCancel()
+        {
+            Debug.Log("[Stage07] ▶ 테스트 11: UndoAsync/RedoAsync CancellationToken — Cancel()과 동일하게 취소");
+            var invoker = CommandBus.Create<CommandUnit>()
+                .WithPolicy(AsyncPolicy.Sequential)
+                .WithHistory(10)
+                .Build();
+
+            var cmd = new AsyncCommand<CommandUnit>(
+                execute: async (_, phase, ct) =>
+                {
+                    if (phase == ExecutionPhase.Redo)
+                        await UniTask.Delay(1000, cancellationToken: ct);
+                },
+                undo: async (_, ct) =>
+                {
+                    await UniTask.Delay(1000, cancellationToken: ct);
+                },
+                name: "TokenUndoRedo"
+            );
+
+            await invoker.ExecuteAsync(cmd);
+
+            var undoCts = new CancellationTokenSource();
+            var undoTask = invoker.UndoAsync(undoCts.Token);
+            await UniTask.Delay(50);
+            undoCts.Cancel();
+            var undoResult = await undoTask;
+
+            var redoCts = new CancellationTokenSource();
+            var redoTask = invoker.RedoAsync(redoCts.Token);
+            await UniTask.Delay(50);
+            redoCts.Cancel();
+            var redoResult = await redoTask;
+
+            if (undoResult == ExecutionResult.Cancelled && redoResult == ExecutionResult.Cancelled)
+                Pass("테스트11 Undo/Redo 토큰 취소");
+            else
+                Fail("테스트11 Undo/Redo 토큰 취소", $"Undo={undoResult}, Redo={redoResult}");
+
+            undoCts.Dispose();
+            redoCts.Dispose();
             invoker.Dispose();
         }
     }

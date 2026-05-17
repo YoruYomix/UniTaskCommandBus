@@ -26,7 +26,7 @@ invoker.Execute(new MoveCommand(), payload);
 - **5 async policies** — Drop, Sequential, Switch, ThrottleLast, Parallel
 - **Full Undo / Redo** with `JumpTo`, `Pop`, and `Clear`
 - **`OnHistoryChanged` event** — drives any timeline UI
-- **`ExecuteAsync`** returns `UniTask<ExecutionResult>` — await it, cancel it, or forget it
+- **`ExecuteAsync`** returns `UniTask<ExecutionResult>` — await it, cancel it with `Cancel()` or a `CancellationToken`, or forget it
 - **`OnError` event** — exceptions surface without crashing the invoker
 - **Zero payload boilerplate** via `CommandUnit`
 
@@ -211,6 +211,7 @@ CommandBus.Create<T>()
 |--------|-------------|
 | `Execute(cmd)` | Fire-and-forget |
 | `ExecuteAsync(cmd)` | Awaitable; returns `ExecutionResult` |
+| `ExecuteAsync(cmd, ct)` | Awaitable; external token cancels through the same path as `Cancel()` |
 | `Cancel()` | Cancel running; preserve queue |
 | `CancelAll()` | Cancel running + drain queue |
 | `OnError` | `Action<Exception>` — called on lambda throw |
@@ -222,6 +223,7 @@ CommandBus.Create<T>()
 |--------|-------------|
 | `Undo()` / `UndoAsync()` | Step back (Switch semantics) |
 | `Redo()` / `RedoAsync()` | Step forward (Switch semantics) |
+| `UndoAsync(ct)` / `RedoAsync(ct)` | Awaitable history moves cancellable through the same path as `Cancel()` |
 | `JumpTo(index)` | Move to any index; fires one `Jump` event |
 | `Pop()` | Remove tip entry or fire event only when browsing |
 | `Clear()` | Wipe all history |
@@ -241,6 +243,18 @@ switch (await invoker.ExecuteAsync(cmd))
 }
 ```
 
+### External CancellationToken
+
+`ExecuteAsync`, `UndoAsync`, and `RedoAsync` accept optional `CancellationToken` overloads. Cancelling that token behaves like calling `Cancel()` on the invoker: in-progress work receives cancellation through the command lambda's `ct`, queued work is preserved, and awaiters complete with `ExecutionResult.Cancelled`.
+
+```csharp
+using var cts = new CancellationTokenSource();
+
+var result = await invoker.ExecuteAsync(cmd, payload, cts.Token);
+var undoResult = await historyInvoker.UndoAsync(cts.Token);
+var redoResult = await historyInvoker.RedoAsync(cts.Token);
+```
+
 ---
 
 ## Samples
@@ -254,6 +268,9 @@ Attach the `Stage0N_*Sample` component to an empty GameObject and press Play —
 | Stage 02 · Async & Policies | `AsyncCommand`, all 5 policies, `Cancel` / `CancelAll` |
 | Stage 03 · History | `HistoryInvoker`, Undo / Redo / Pop / Clear, `OnHistoryChanged`, history-loading rules |
 | Stage 04 · Advanced | `JumpTo`, `Dispose`, `ExecutionPhase`, end-to-end scenario |
+| Stage 05 · Stress Test | Mixed policy, history, Undo/Redo stress coverage |
+| Stage 06 · Super Stress Test | Edge cases for cross-cancellation, reentrancy, max history, and interleaving |
+| Stage 07 · Fault Tolerance | `Faulted`, `OnError`, policy recovery, and cancellation-token regression tests |
 
 ---
 

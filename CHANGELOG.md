@@ -18,4 +18,5 @@ All notable changes to this project will be documented in this file.
 - "Record → event → lambda" ordering guarantee for `OnHistoryChanged` on Execute
 - JumpTo fires a single Jump event; intermediate steps suppress individual Undo/Redo events
 - Full `IDisposable` support on both `Invoker<T>` and `HistoryInvoker<T>`
-- 4 sample stages with pass/fail console output for manual testing in Unity
+- CancellationToken overloads for `ExecuteAsync`, `UndoAsync`, and `RedoAsync`; token cancellation follows the same shared path as `Cancel()`
+- 7 sample stages with pass/fail console output for manual testing in Unity

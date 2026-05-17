@@ -95,16 +95,28 @@ namespace UniTaskCommandBus
         /// Always uses Switch semantics.
         /// </summary>
         public UniTask<ExecutionResult> UndoAsync()
+            => UndoAsync(CancellationToken.None);
+
+        /// <summary>
+        /// Undoes the command at the current pointer and awaits completion.
+        /// The cancellation token cancels through the same shared path as <see cref="Invoker{T}.Cancel"/>.
+        /// </summary>
+        public UniTask<ExecutionResult> UndoAsync(CancellationToken cancellationToken)
         {
             ThrowIfDisposed();
             if (_currentIndex < 0)
                 throw new InvalidOperationException("되돌릴 히스토리가 없습니다.");
+            if (cancellationToken.IsCancellationRequested)
+            {
+                ReplaceCts();
+                return UniTask.FromResult(ExecutionResult.Cancelled);
+            }
 
             var entry = _history[_currentIndex];
             _currentIndex--;
             FireEvent(HistoryActionType.Undo, _currentIndex, NameAtIndex(_currentIndex));
 
-            return StartUndoRedoTask(ct => entry.Command.InvokeUndo(entry.Payload, ct));
+            return StartUndoRedoTask(ct => entry.Command.InvokeUndo(entry.Payload, ct), cancellationToken);
         }
 
         // ── Redo ─────────────────────────────────────────────────────────────
@@ -125,16 +137,28 @@ namespace UniTaskCommandBus
         /// Always uses Switch semantics.
         /// </summary>
         public UniTask<ExecutionResult> RedoAsync()
+            => RedoAsync(CancellationToken.None);
+
+        /// <summary>
+        /// Redoes the next command and awaits completion.
+        /// The cancellation token cancels through the same shared path as <see cref="Invoker{T}.Cancel"/>.
+        /// </summary>
+        public UniTask<ExecutionResult> RedoAsync(CancellationToken cancellationToken)
         {
             ThrowIfDisposed();
             if (_currentIndex >= _history.Count - 1)
                 throw new InvalidOperationException("다시 실행할 히스토리가 없습니다.");
+            if (cancellationToken.IsCancellationRequested)
+            {
+                ReplaceCts();
+                return UniTask.FromResult(ExecutionResult.Cancelled);
+            }
 
             _currentIndex++;
             var entry = _history[_currentIndex];
             FireEvent(HistoryActionType.Redo, _currentIndex, entry.Name);
 
-            return StartUndoRedoTask(ct => entry.Command.InvokeExecute(entry.Payload, ExecutionPhase.Redo, ct));
+            return StartUndoRedoTask(ct => entry.Command.InvokeExecute(entry.Payload, ExecutionPhase.Redo, ct), cancellationToken);
         }
 
         // ── Pop ──────────────────────────────────────────────────────────────
@@ -233,7 +257,7 @@ namespace UniTaskCommandBus
         /// <summary>
         /// Starts a Switch-policy undo/redo operation: cancels any previous one, then runs the given task.
         /// </summary>
-        private UniTask<ExecutionResult> StartUndoRedoTask(Func<CancellationToken, UniTask> operation)
+        private UniTask<ExecutionResult> StartUndoRedoTask(Func<CancellationToken, UniTask> operation, CancellationToken cancellationToken)
         {
             var prevTcs = _undoRedoTcs;
             ReplaceCts();
@@ -241,11 +265,18 @@ namespace UniTaskCommandBus
 
             var tcs = new UniTaskCompletionSource<ExecutionResult>();
             _undoRedoTcs = tcs;
-            RunUndoRedoAsync(operation, tcs).Forget();
+            CancellationTokenRegistration registration = default;
+            if (cancellationToken.CanBeCanceled)
+                registration = cancellationToken.Register(static state => ((HistoryInvoker<T>)state).ReplaceCts(), this);
+
+            RunUndoRedoAsync(operation, tcs, registration).Forget();
             return tcs.Task;
         }
 
-        private async UniTask RunUndoRedoAsync(Func<CancellationToken, UniTask> operation, UniTaskCompletionSource<ExecutionResult> tcs)
+        private async UniTask RunUndoRedoAsync(
+            Func<CancellationToken, UniTask> operation,
+            UniTaskCompletionSource<ExecutionResult> tcs,
+            CancellationTokenRegistration registration)
         {
             try
             {
@@ -258,6 +289,7 @@ namespace UniTaskCommandBus
             }
             finally
             {
+                registration.Dispose();
                 if (_undoRedoTcs == tcs)
                     _undoRedoTcs = null;
             }

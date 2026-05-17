@@ -491,9 +491,9 @@ var placeCmd = new AsyncCommand<SlotAssignment>(
 await invoker.ExecuteAsync(placeCmd, new SlotAssignment(3, 5));
 ```
 
-### Cancellation Management — `invoker.Cancel()`
+### Cancellation Management — `invoker.Cancel()` and External Tokens
 
-Manually creating, passing, and disposing `CancellationToken` instances for each async operation is tedious. In this library **the Invoker holds a `CancellationToken` internally**, so cancellation is a single call:
+Manually creating, passing, and disposing `CancellationToken` instances for each async operation is often tedious. In this library **the Invoker holds a `CancellationToken` internally**, so cancellation is a single call:
 
 ```csharp
 invoker.Cancel();
@@ -502,12 +502,24 @@ invoker.Cancel();
 This cancels the currently running async command. The `ct` argument in the lambda is the token the Invoker injects internally.
 
 ```csharp
-// No need to create or pass a CancellationToken manually
+// No need to create or pass a CancellationToken manually in the common case
 await invoker.ExecuteAsync(placeCmd, new SlotAssignment(3, 5));
 
 // Cancel whenever needed
 invoker.Cancel();
 ```
+
+For call-site scoped cancellation, `ExecuteAsync`, `UndoAsync`, and `RedoAsync` also accept external `CancellationToken` overloads:
+
+```csharp
+using var cts = new CancellationTokenSource();
+
+await invoker.ExecuteAsync(placeCmd, new SlotAssignment(3, 5), cts.Token);
+await historyInvoker.UndoAsync(cts.Token);
+await historyInvoker.RedoAsync(cts.Token);
+```
+
+Cancelling an external token uses the same shared cancellation path as `Cancel()`: in-progress work receives cancellation through the command lambda's `ct`, queued work is preserved, and the awaiting call completes with `ExecutionResult.Cancelled` instead of throwing `OperationCanceledException`. This is intentionally an Invoker-level cancellation, not a private "only this one lambda" token.
 
 Benefits of this approach:
 
@@ -543,8 +555,11 @@ Use `CancelAll()` when you want to **fully stop everything this Invoker is doing
 ```csharp
 // Cancellable in every case
 await invoker.ExecuteAsync(cmd, payload);   // → cancelable with Cancel() / CancelAll()
+await invoker.ExecuteAsync(cmd, payload, ct); // → token cancellation behaves like Cancel()
 await invoker.UndoAsync();                  // → cancelable with Cancel() / CancelAll()
+await invoker.UndoAsync(ct);                // → token cancellation behaves like Cancel()
 await invoker.RedoAsync();                  // → cancelable with Cancel() / CancelAll()
+await invoker.RedoAsync(ct);                // → token cancellation behaves like Cancel()
 ```
 
 The user never needs to track "which direction of work is currently running" — they just express the intent to **stop.** This meshes naturally with the design in which the cancellation token is managed at the Invoker level.
@@ -632,12 +647,13 @@ public enum ExecutionResult
 | `Parallel` | Starts immediately | When **execution completes** | `Completed` |
 | `Parallel` | `Cancel()` called while multiple commands are running | **The moment each is cancelled** | Each `Cancelled` |
 | (all) | `Cancel()` / `CancelAll()` called | **The moment of cancellation** | `Cancelled` |
+| (all) | External `CancellationToken` passed to `ExecuteAsync` is cancelled | **The moment the shared cancellation reaches this call** | `Cancelled` |
 
 The core principle: **"Did the Execute call I made finish?"** is the criterion for await. If the command waited in the queue and eventually ran to completion, you wait until then. If policy discarded or cancelled it, that is the completion moment.
 
 **Dropped vs Cancelled distinction:**
 - **`Dropped`**: the policy itself made the normal decision "do not execute" (Drop rejection, ThrottleLast middle-value replacement)
-- **`Cancelled`**: interrupted by an external cancellation API (`Cancel`/`CancelAll`) or by Switch (whether running or waiting — always `Cancelled`)
+- **`Cancelled`**: interrupted by an external cancellation API (`Cancel`/`CancelAll`), by a passed `CancellationToken`, or by Switch (whether running or waiting — always `Cancelled`)
 
 A command removed from a queue by `CancelAll()` is classified as `Cancelled` because "there was an intent to execute, but external intervention stopped it."
 
@@ -721,6 +737,13 @@ invoker.Undo();
 // When every step must complete, the user controls it with await
 await invoker.UndoAsync();
 await invoker.UndoAsync();
+```
+
+`UndoAsync` and `RedoAsync` also accept `CancellationToken` overloads. Cancelling the token behaves like `Cancel()` and completes the awaited operation with `ExecutionResult.Cancelled`.
+
+```csharp
+await invoker.UndoAsync(ct);
+await invoker.RedoAsync(ct);
 ```
 
 ### Distinguishing Execution Phases — `ExecutionPhase`
@@ -877,6 +900,8 @@ Execute, Undo, and Redo all follow the same consistent three-stage pipeline: **"
 
 Undo and Redo **always use Switch policy** (see "Undo/Redo Always Use Switch" above), so they follow this three-stage pipeline without exception. Execute follows the same pipeline, but **stage 1 varies with the `AsyncPolicy` setting:**
 
+If an external `CancellationToken` passed to `ExecuteAsync`, `UndoAsync`, or `RedoAsync` is already cancelled before the call starts, the call returns `ExecutionResult.Cancelled` without changing history state. If that token is cancelled after execution has started, it follows the normal shared cancellation path, so any history state change that already occurred remains in place.
+
 | Policy | Stage 1 behavior for Execute |
 |---|---|
 | `Switch` | Cancel in-progress work (same as Undo/Redo) |
@@ -912,9 +937,11 @@ Specific situations where this rule applies:
 | Discarded by `ThrottleLast` as a middle value | **Not recorded** | `Dropped` |
 | Removed from `Sequential` queue by `CancelAll()` | **Not recorded** | `Cancelled` |
 | `ThrottleLast`'s "last value" slot removed by `CancelAll()` | **Not recorded** | `Cancelled` |
+| External token already cancelled before `ExecuteAsync` starts | **Not recorded** | `Cancelled` |
 | Waited in `Sequential` queue and started executing when its turn came | **Recorded** (at the moment execution starts) | `Completed` |
 | Previously-running command cancelled by `Switch` (lambda had already started) | **Recorded** (already recorded at start time) | `Cancelled` |
 | Cancelled by `Cancel()` while running in `Parallel` | **Recorded** (each one individually) | Each `Cancelled` |
+| External token cancelled after execution started | **Recorded** (already recorded at start time) | `Cancelled` |
 | Exception thrown from inside the lambda | **Recorded** (execution had already begun) | Exception propagates |
 
 The key criterion is **"was the `execute` lambda ever called?"** Recording happens immediately before the lambda is called, and the lambda runs immediately after. These two steps are one indivisible unit; recording cannot happen without execution, and execution cannot happen without recording.
